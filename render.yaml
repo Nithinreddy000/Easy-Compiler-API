@@ -1,0 +1,9 @@
+services:
+  - type: web
+    name: easy-compiler-api
+    env: docker
+    dockerfilePath: ./Dockerfile
+    plan: free
+    envVars:
+      - key: NODE_ENV
+        value: production 

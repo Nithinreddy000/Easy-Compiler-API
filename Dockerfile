@@ -1,27 +1,29 @@
-FROM ubuntu
 FROM node:17
 
 WORKDIR /usr/src/app
 
-ENV DEBIAN_FRONTEND noninteractive
+ENV DEBIAN_FRONTEND=noninteractive
+
+# Install required packages
 RUN apt-get update && \
-    apt-get -y install gcc mono-mcs && \
-    rm -rf /var/lib/apt/lists/* && \
-    apt-get -y install python3
+    apt-get install -y \
+    gcc \
+    mono-mcs \
+    python3 \
+    wget \
+    default-jdk \
+    && rm -rf /var/lib/apt/lists/*
 
-RUN apt update -y && apt-get install -y software-properties-common && \
-    apt-add-repository 'deb http://security.debian.org/debian-security stretch/updates main' && apt-get update -y && \
-    apt-get install -y openjdk-8-jdk-headless && \
-    apt-get clean
-ENV java /usr/lib/jvm/java-8-openjdk-amd64/
-RUN export java
+# Set JAVA_HOME environment variable correctly
+ENV JAVA_HOME=/usr/lib/jvm/java-11-openjdk-amd64
+ENV PATH=$PATH:$JAVA_HOME/bin
 
+# Copy package files and install dependencies
 COPY package*.json ./
-
 RUN npm install
 
-
+# Copy the rest of the application
 COPY . .
 
 EXPOSE 8080
-CMD ["npm","run","start"]
+CMD ["npm", "run", "start"]
