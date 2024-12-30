@@ -8,98 +8,96 @@ const { v4: uuidv4 } = require('uuid');
 router.post('/', async (req, res) => {
     const { code, input } = req.body;
     if (!code) {
-        return res.status(400).json({ error: 'No code provided' });
+        return res.json({ 
+            success: false, 
+            error: 'No code provided' 
+        });
     }
 
     const filename = uuidv4();
     const filepath = path.join(__dirname, '../temp');
 
-    // Create temp directory if it doesn't exist
     if (!fs.existsSync(filepath)) {
         fs.mkdirSync(filepath);
     }
 
     const sourceFile = path.join(filepath, 'Main.java');
+    const classFile = path.join(filepath, 'Main.class');
 
     try {
-        // Write the code to a file
         fs.writeFileSync(sourceFile, code);
 
-        // Compile the code
-        await new Promise((resolve, reject) => {
-            exec(`javac "${sourceFile}"`, (error, stdout, stderr) => {
-                if (error) {
-                    reject(stderr);
-                    return;
-                }
-                resolve(stdout);
+        // Compile Java code
+        try {
+            await new Promise((resolve, reject) => {
+                exec(`javac "${sourceFile}"`, (error, stdout, stderr) => {
+                    if (error) reject(stderr);
+                    else resolve(stdout);
+                });
             });
-        });
+        } catch (compileError) {
+            return res.json({
+                success: false,
+                error: compileError.toString(),
+                isCompileError: true
+            });
+        }
 
-        // Run the code with spawn to handle interactive input
         const javaProcess = spawn('java', ['-cp', filepath, 'Main']);
         let outputBuffer = '';
-        let currentOutput = '';
+        let errorBuffer = '';
         let isWaitingForInput = false;
 
-        // Handle program output
         javaProcess.stdout.on('data', (data) => {
             const text = data.toString();
             outputBuffer += text;
-            currentOutput = outputBuffer;
             
-            // If we detect an input prompt
-            if (text.includes('Scanner') || text.includes('?') || text.endsWith(': ')) {
+            // Check for input prompts
+            if (text.endsWith(': ') || text.endsWith('? ') || text.includes('Scanner')) {
                 isWaitingForInput = true;
-                res.write(JSON.stringify({ 
-                    partial: true, 
-                    output: currentOutput 
-                }) + '\n');
             }
         });
 
-        // Handle program errors
         javaProcess.stderr.on('data', (data) => {
-            outputBuffer += data.toString();
+            errorBuffer += data.toString();
         });
 
-        // If there's input, write it to the process
         if (input) {
             javaProcess.stdin.write(input + '\n');
             javaProcess.stdin.end();
         }
 
-        // Wait for the process to complete
-        await new Promise((resolve, reject) => {
-            javaProcess.on('close', (code) => {
-                if (code !== 0 && !isWaitingForInput) {
-                    reject(outputBuffer || 'Process exited with non-zero code');
-                } else {
-                    resolve();
-                }
-            });
+        const exitCode = await new Promise((resolve) => {
+            javaProcess.on('close', resolve);
         });
 
-        // Clean up
-        fs.unlinkSync(sourceFile);
-        fs.unlinkSync(path.join(filepath, 'Main.class'));
+        // Cleanup
+        if (fs.existsSync(sourceFile)) fs.unlinkSync(sourceFile);
+        if (fs.existsSync(classFile)) fs.unlinkSync(classFile);
 
-        res.json({ 
-            success: true, 
+        if (exitCode !== 0 && !isWaitingForInput) {
+            return res.json({
+                success: false,
+                error: errorBuffer || 'Program exited with error',
+                output: outputBuffer
+            });
+        }
+
+        return res.json({
+            success: true,
             output: outputBuffer,
+            error: errorBuffer,
             isWaitingForInput
         });
 
     } catch (error) {
-        // Clean up on error
+        // Cleanup on error
         if (fs.existsSync(sourceFile)) fs.unlinkSync(sourceFile);
-        if (fs.existsSync(path.join(filepath, 'Main.class'))) {
-            fs.unlinkSync(path.join(filepath, 'Main.class'));
-        }
+        if (fs.existsSync(classFile)) fs.unlinkSync(classFile);
 
-        res.json({ 
-            success: false, 
-            error: error.toString() 
+        return res.json({
+            success: false,
+            error: error.toString()
         });
     }
 });
