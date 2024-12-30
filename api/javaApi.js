@@ -38,30 +38,42 @@ router.post('/', async (req, res) => {
 
         // Run the code with spawn to handle interactive input
         const javaProcess = spawn('java', ['-cp', filepath, 'Main']);
-        let output = '';
-        let error = '';
+        let outputBuffer = '';
+        let currentOutput = '';
+        let isWaitingForInput = false;
 
         // Handle program output
         javaProcess.stdout.on('data', (data) => {
-            output += data.toString();
+            const text = data.toString();
+            outputBuffer += text;
+            currentOutput = outputBuffer;
+            
+            // If we detect an input prompt
+            if (text.includes('Scanner') || text.includes('?') || text.endsWith(': ')) {
+                isWaitingForInput = true;
+                res.write(JSON.stringify({ 
+                    partial: true, 
+                    output: currentOutput 
+                }) + '\n');
+            }
         });
 
         // Handle program errors
         javaProcess.stderr.on('data', (data) => {
-            error += data.toString();
+            outputBuffer += data.toString();
         });
 
         // If there's input, write it to the process
         if (input) {
-            javaProcess.stdin.write(input);
+            javaProcess.stdin.write(input + '\n');
             javaProcess.stdin.end();
         }
 
         // Wait for the process to complete
         await new Promise((resolve, reject) => {
             javaProcess.on('close', (code) => {
-                if (code !== 0) {
-                    reject(error || 'Process exited with non-zero code');
+                if (code !== 0 && !isWaitingForInput) {
+                    reject(outputBuffer || 'Process exited with non-zero code');
                 } else {
                     resolve();
                 }
@@ -74,8 +86,8 @@ router.post('/', async (req, res) => {
 
         res.json({ 
             success: true, 
-            output: output || '',
-            error: error || ''
+            output: outputBuffer,
+            isWaitingForInput
         });
 
     } catch (error) {
