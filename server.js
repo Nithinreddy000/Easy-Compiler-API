@@ -12,10 +12,19 @@ app.use(cors());
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
+// Add logging middleware
+app.use((req, res, next) => {
+    console.log(`${req.method} ${req.path}`, {
+        body: req.body,
+        query: req.query
+    });
+    next();
+});
+
 // Testing routers
 app.get('/', (req, res) => {
     res.send("API IS RUNNING")
-})
+});
 
 // C++ Router
 app.use('/api', require('./api/cppApi'));
@@ -24,9 +33,8 @@ app.use('/api', require('./api/cppApi'));
 app.use('/api/python', require('./api/pythonApi'));
 
 // Java Router
-app.use('/api/java', require('./api/javaApi'))
+app.use('/api/java', require('./api/javaApi'));
 
-// Serve static files
 app.listen(PORT, () => {
     console.log(`Server is running on port ${PORT}`);
 });
