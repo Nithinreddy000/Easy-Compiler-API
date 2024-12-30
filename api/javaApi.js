@@ -2,7 +2,7 @@ const express = require('express');
 const router = express.Router();
 const fs = require('fs');
 const path = require('path');
-const { exec } = require('child_process');
+const { exec, spawn } = require('child_process');
 const { v4: uuidv4 } = require('uuid');
 
 router.post('/', async (req, res) => {
@@ -20,14 +20,10 @@ router.post('/', async (req, res) => {
     }
 
     const sourceFile = path.join(filepath, 'Main.java');
-    const inputFile = path.join(filepath, `${filename}.txt`);
 
     try {
         // Write the code to a file
         fs.writeFileSync(sourceFile, code);
-        if (input) {
-            fs.writeFileSync(inputFile, input);
-        }
 
         // Compile the code
         await new Promise((resolve, reject) => {
@@ -40,30 +36,47 @@ router.post('/', async (req, res) => {
             });
         });
 
-        // Run the code
-        const output = await new Promise((resolve, reject) => {
-            let command = `java -cp "${filepath}" Main`;
-            if (input) {
-                command = `java -cp "${filepath}" Main < "${inputFile}"`;
-            }
-            
-            exec(command, (error, stdout, stderr) => {
-                if (error) {
-                    reject(stderr);
-                    return;
+        // Run the code with spawn to handle interactive input
+        const javaProcess = spawn('java', ['-cp', filepath, 'Main']);
+        let output = '';
+        let error = '';
+
+        // Handle program output
+        javaProcess.stdout.on('data', (data) => {
+            output += data.toString();
+        });
+
+        // Handle program errors
+        javaProcess.stderr.on('data', (data) => {
+            error += data.toString();
+        });
+
+        // If there's input, write it to the process
+        if (input) {
+            javaProcess.stdin.write(input);
+            javaProcess.stdin.end();
+        }
+
+        // Wait for the process to complete
+        await new Promise((resolve, reject) => {
+            javaProcess.on('close', (code) => {
+                if (code !== 0) {
+                    reject(error || 'Process exited with non-zero code');
+                } else {
+                    resolve();
                 }
-                resolve(stdout);
             });
         });
 
         // Clean up
         fs.unlinkSync(sourceFile);
         fs.unlinkSync(path.join(filepath, 'Main.class'));
-        if (input) {
-            fs.unlinkSync(inputFile);
-        }
 
-        res.json({ success: true, output });
+        res.json({ 
+            success: true, 
+            output: output || '',
+            error: error || ''
+        });
 
     } catch (error) {
         // Clean up on error
@@ -71,9 +84,11 @@ router.post('/', async (req, res) => {
         if (fs.existsSync(path.join(filepath, 'Main.class'))) {
             fs.unlinkSync(path.join(filepath, 'Main.class'));
         }
-        if (input && fs.existsSync(inputFile)) fs.unlinkSync(inputFile);
 
-        res.json({ success: false, error: error.toString() });
+        res.json({ 
+            success: false, 
+            error: error.toString() 
+        });
     }
 });
 

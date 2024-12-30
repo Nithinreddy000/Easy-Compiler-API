@@ -2,7 +2,7 @@ const express = require('express');
 const router = express.Router();
 const fs = require('fs');
 const path = require('path');
-const { exec } = require('child_process');
+const { spawn } = require('child_process');
 const { v4: uuidv4 } = require('uuid');
 
 router.post('/', async (req, res) => {
@@ -20,45 +20,60 @@ router.post('/', async (req, res) => {
     }
 
     const sourceFile = path.join(filepath, `${filename}.py`);
-    const inputFile = path.join(filepath, `${filename}.txt`);
 
     try {
         // Write the code to a file
         fs.writeFileSync(sourceFile, code);
+
+        // Run the code with spawn to handle interactive input
+        const pythonProcess = spawn('python3', [sourceFile]);
+        let output = '';
+        let error = '';
+
+        // Handle program output
+        pythonProcess.stdout.on('data', (data) => {
+            output += data.toString();
+        });
+
+        // Handle program errors
+        pythonProcess.stderr.on('data', (data) => {
+            error += data.toString();
+        });
+
+        // If there's input, write it to the process
         if (input) {
-            fs.writeFileSync(inputFile, input);
+            pythonProcess.stdin.write(input);
+            pythonProcess.stdin.end();
         }
 
-        // Run the code
-        const output = await new Promise((resolve, reject) => {
-            let command = `python3 "${sourceFile}"`;
-            if (input) {
-                command = `python3 "${sourceFile}" < "${inputFile}"`;
-            }
-            
-            exec(command, (error, stdout, stderr) => {
-                if (error) {
-                    reject(stderr);
-                    return;
+        // Wait for the process to complete
+        await new Promise((resolve, reject) => {
+            pythonProcess.on('close', (code) => {
+                if (code !== 0) {
+                    reject(error || 'Process exited with non-zero code');
+                } else {
+                    resolve();
                 }
-                resolve(stdout);
             });
         });
 
         // Clean up
         fs.unlinkSync(sourceFile);
-        if (input) {
-            fs.unlinkSync(inputFile);
-        }
 
-        res.json({ success: true, output });
+        res.json({ 
+            success: true, 
+            output: output || '',
+            error: error || ''
+        });
 
     } catch (error) {
         // Clean up on error
         if (fs.existsSync(sourceFile)) fs.unlinkSync(sourceFile);
-        if (input && fs.existsSync(inputFile)) fs.unlinkSync(inputFile);
 
-        res.json({ success: false, error: error.toString() });
+        res.json({ 
+            success: false, 
+            error: error.toString() 
+        });
     }
 });
 
