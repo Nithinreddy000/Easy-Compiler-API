@@ -8,7 +8,7 @@ const { v4: uuidv4 } = require('uuid');
 router.post('/', async (req, res) => {
     const { code, input } = req.body;
     if (!code) {
-        return res.status(400).json({ 
+        return res.json({ 
             success: false, 
             error: 'No code provided' 
         });
@@ -16,28 +16,31 @@ router.post('/', async (req, res) => {
 
     const filename = uuidv4();
     const filepath = path.join(__dirname, '../temp');
-
-    if (!fs.existsSync(filepath)) {
-        fs.mkdirSync(filepath);
-    }
-
     const sourceFile = path.join(filepath, `${filename}.py`);
 
     try {
         fs.writeFileSync(sourceFile, code);
+        
+        // Use pty.js to create pseudo-terminal for interactive I/O
+        const pythonProcess = spawn('python3', [sourceFile], {
+            stdio: ['pipe', 'pipe', 'pipe']
+        });
 
-        const pythonProcess = spawn('python3', [sourceFile]);
         let outputBuffer = '';
         let errorBuffer = '';
         let isWaitingForInput = false;
+        let inputPrompt = '';
 
         pythonProcess.stdout.on('data', (data) => {
             const text = data.toString();
-            outputBuffer += text;
             
-            // Check for input prompts
-            if (text.includes('input') || text.endsWith('? ') || text.endsWith(': ')) {
+            // Store the input prompt separately
+            if (text.includes('input') || text.endsWith(': ') || text.endsWith('? ')) {
+                inputPrompt = text;
                 isWaitingForInput = true;
+                // Don't add prompt to output buffer yet
+            } else {
+                outputBuffer += text;
             }
         });
 
@@ -46,7 +49,9 @@ router.post('/', async (req, res) => {
         });
 
         if (input) {
+            // When input is provided, show both prompt and input
             pythonProcess.stdin.write(input + '\n');
+            outputBuffer = inputPrompt + input + '\n' + outputBuffer;
             pythonProcess.stdin.end();
         }
 
@@ -68,7 +73,8 @@ router.post('/', async (req, res) => {
             success: true,
             output: outputBuffer,
             error: errorBuffer,
-            isWaitingForInput
+            isWaitingForInput,
+            inputPrompt: isWaitingForInput ? inputPrompt : null
         });
 
     } catch (error) {

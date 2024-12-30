@@ -16,11 +16,6 @@ router.post('/', async (req, res) => {
 
     const filename = uuidv4();
     const filepath = path.join(__dirname, '../temp');
-
-    if (!fs.existsSync(filepath)) {
-        fs.mkdirSync(filepath);
-    }
-
     const sourceFile = path.join(filepath, `${filename}.cpp`);
     const outputFile = path.join(filepath, `${filename}.exe`);
 
@@ -43,18 +38,25 @@ router.post('/', async (req, res) => {
             });
         }
 
-        const cppProcess = spawn(outputFile);
+        const cppProcess = spawn(outputFile, [], {
+            stdio: ['pipe', 'pipe', 'pipe']
+        });
+
         let outputBuffer = '';
         let errorBuffer = '';
         let isWaitingForInput = false;
+        let inputPrompt = '';
 
         cppProcess.stdout.on('data', (data) => {
             const text = data.toString();
-            outputBuffer += text;
             
-            // Check for input prompts
-            if (text.endsWith(': ') || text.endsWith('? ') || text.includes('cin')) {
+            // Store the input prompt separately
+            if (text.includes('cin') || text.endsWith(': ') || text.endsWith('? ')) {
+                inputPrompt = text;
                 isWaitingForInput = true;
+                // Don't add prompt to output buffer yet
+            } else {
+                outputBuffer += text;
             }
         });
 
@@ -63,7 +65,9 @@ router.post('/', async (req, res) => {
         });
 
         if (input) {
+            // When input is provided, show both prompt and input
             cppProcess.stdin.write(input + '\n');
+            outputBuffer = inputPrompt + input + '\n' + outputBuffer;
             cppProcess.stdin.end();
         }
 
@@ -87,7 +91,8 @@ router.post('/', async (req, res) => {
             success: true,
             output: outputBuffer,
             error: errorBuffer,
-            isWaitingForInput
+            isWaitingForInput,
+            inputPrompt: isWaitingForInput ? inputPrompt : null
         });
 
     } catch (error) {

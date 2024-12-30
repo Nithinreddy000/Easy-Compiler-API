@@ -16,11 +16,6 @@ router.post('/', async (req, res) => {
 
     const filename = uuidv4();
     const filepath = path.join(__dirname, '../temp');
-
-    if (!fs.existsSync(filepath)) {
-        fs.mkdirSync(filepath);
-    }
-
     const sourceFile = path.join(filepath, 'Main.java');
     const classFile = path.join(filepath, 'Main.class');
 
@@ -43,18 +38,25 @@ router.post('/', async (req, res) => {
             });
         }
 
-        const javaProcess = spawn('java', ['-cp', filepath, 'Main']);
+        const javaProcess = spawn('java', ['-cp', filepath, 'Main'], {
+            stdio: ['pipe', 'pipe', 'pipe']
+        });
+
         let outputBuffer = '';
         let errorBuffer = '';
         let isWaitingForInput = false;
+        let inputPrompt = '';
 
         javaProcess.stdout.on('data', (data) => {
             const text = data.toString();
-            outputBuffer += text;
             
-            // Check for input prompts
-            if (text.endsWith(': ') || text.endsWith('? ') || text.includes('Scanner')) {
+            // Store the input prompt separately
+            if (text.includes('Scanner') || text.endsWith(': ') || text.endsWith('? ')) {
+                inputPrompt = text;
                 isWaitingForInput = true;
+                // Don't add prompt to output buffer yet
+            } else {
+                outputBuffer += text;
             }
         });
 
@@ -63,7 +65,9 @@ router.post('/', async (req, res) => {
         });
 
         if (input) {
+            // When input is provided, show both prompt and input
             javaProcess.stdin.write(input + '\n');
+            outputBuffer = inputPrompt + input + '\n' + outputBuffer;
             javaProcess.stdin.end();
         }
 
@@ -87,7 +91,8 @@ router.post('/', async (req, res) => {
             success: true,
             output: outputBuffer,
             error: errorBuffer,
-            isWaitingForInput
+            isWaitingForInput,
+            inputPrompt: isWaitingForInput ? inputPrompt : null
         });
 
     } catch (error) {
